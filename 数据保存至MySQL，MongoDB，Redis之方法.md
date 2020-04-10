@@ -1,0 +1,253 @@
+### 豆瓣爬虫数据之保存至MySQL，MongoDB和CSV各种类型文件
+
+源码链接：<https://github.com/keepshuai/douban_spider_save>
+
+#### 1、豆瓣读书目标地址确认：
+
+分析目标网站结构，找到每本书籍包裹的标签为Li标签下的**class="subject-item"**标签下
+
+![1586521536457](C:\Users\Sheldon\AppData\Roaming\Typora\typora-user-images\1586521536457.png)
+
+### 2、网页源代码获取
+
+以下为了方便构造随机User-Agent，故完善代码如下：
+
+```
+mport csv
+import requests,json, pymysql, pymongo
+from fake_useragent import UserAgent
+from lxml import etree
+
+
+ua = UserAgent()  # 构造随机UA
+url = "https://book.douban.com/tag/%E8%AF%97%E6%AD%8C" # start_url
+headers = {'User-Agent': ua.random}
+response = requests.get(url, headers=headers).content.decode()  # 获取响应
+# print(response)
+html_data = etree.HTML(response) # 声明文本，进行初始化
+ret = html_data.xpath('//*[@id="subject_list"]/ul/li')  # xpath提取首页中标签对象
+print(ret)
+```
+
+运行上面代码会发现如下列表对象结果：
+
+![1586521895716](C:\Users\Sheldon\AppData\Roaming\Typora\typora-user-images\1586521895716.png)
+
+### 3、以下就是提取书籍信息并保存各种格式
+
+1、**保存为.json文件**
+
+```
+ret_list = []
+for tr in ret:
+    ret_dict = {}
+    ret_dict["title"] = tr.xpath('./div[@class="info"]/h2/a/@title')[0]
+    ret_dict["rat"] = tr.xpath('./div[@class="info"]/div[@class="star clearfix"]/span[@class="rating_nums"]/text()')[0]
+    ret_dict["pub"] = tr.xpath('./div[@class="info"]/div[@class="pub"]/text()')[0].replace("\u2022","").replace('\n', '')
+    ret_dict["appraise"] = tr.xpath('./div[@class="info"]/div[@class="star clearfix"]/span[@class="pl"]/text()')[0].replace('\n', '')
+    ret_list.append(ret_dict)
+print(ret_list)
+str_list = str(ret_list)
+data = json.dumps(str_list)
+print(data)
+with open('data.json', 'w') as f:
+    f.write(json.dumps(str_list, indent=2, ensure_ascii=False))
+```
+
+
+
+2、**保存为.txt文件**
+
+```
+for tr in ret:
+    title = tr.xpath('./div[@class="info"]/h2/a/@title')[0]
+    rat = tr.xpath('./div[@class="info"]/div[@class="star clearfix"]/span[@class="rating_nums"]/text()')[0]
+    pub = tr.xpath('./div[@class="info"]/div[@class="pub"]/text()')[0]
+    appraise = tr.xpath('./div[@class="info"]/div[@class="star clearfix"]/span[@class="pl"]')[0]
+    file = open('explore.txt', 'a', encoding='utf-8')
+    file.write('\n'.join([title, rat, pub, appraise]))
+    file.write('\n' + '=' * 50 + '\n')
+    file.close()
+```
+
+3、**保存为.csv文件**
+
+```
+fp = open('data.csv', 'w', newline="", encoding="utf-8")
+writer = csv.writer(fp)
+writer.writerow(('书名', '评分', '出版', '评论'))
+for tr in ret:
+    books = []
+    title = tr.xpath('./div[@class="info"]/h2/a/@title')[0]
+    rat = tr.xpath('./div[@class="info"]/div[@class="star clearfix"]/span[@class="rating_nums"]/text()')[0]
+    pub = tr.xpath('./div[@class="info"]/div[@class="pub"]/text()')[0].replace("\u2022","").replace('\n', '')
+    appraise = tr.xpath('./div[@class="info"]/div[@class="star clearfix"]/span[@class="pl"]/text()')[0].replace('\n', '')
+    books.append([title, rat, pub, appraise])
+
+    for rows in books:
+        writer.writerow(rows)
+fp.close()
+```
+
+4、**保存为.xls(另外补充，全代码)**
+
+```
+import re
+import xlwt
+import requests
+from bs4 import BeautifulSoup
+
+
+def getHtml(url):
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:56.0) Gecko/20100101 Firefox/56.0'}
+    page = requests.get(url, headers=headers)
+    html = page.text
+    return html
+
+
+if __name__ == '__main__':
+    Workbook = xlwt.Workbook()
+    sheet = Workbook.add_sheet('豆瓣图书Top250')
+    sheet.write(2, 2, '书名')
+    sheet.write(2, 3, '作者')
+    sheet.write(2, 4, '译者')
+    sheet.write(2, 5, '出版单位')
+    sheet.write(2, 6, '出版时间')
+    sheet.write(2, 7, '定价')
+    sheet.write(2, 8, '豆瓣评分')
+    sheet.write(2, 9, '评价人数')
+    sheet.write(2, 10, '一句话')
+
+    i = 3
+    j = 3
+    k = 3
+    m = 3
+    for page in range(0, 250, 25):
+        url = 'https://book.douban.com/top250?start={0}'.format(page)
+        html = getHtml(url)
+        Soup = BeautifulSoup(html, 'html.parser')
+        names = Soup.find_all('div', class_='pl2')
+
+        for name in names:
+            book = name.find('a')
+            book = book.text.strip()
+            book = book.replace(' ', '')
+            sheet.write(i, 2, book)
+            i += 1
+
+        Infos = Soup.find_all('p', class_='pl')
+        for Info in Infos:
+            r = 1
+            authorinfo = Info.text
+            authors = authorinfo.split('/')
+            if len(authors) < 4:
+                sheet.write(j, 5, authors[0])
+                sheet.write(j, 6, authors[1])
+                sheet.write(j, 7, authors[2])
+                j += 1
+                continue
+            sheet.write(j, 3, authors[0])
+            if authorinfo.count('/') == 4:
+                sheet.write(j, 4, authors[r])
+                r += 1
+            sheet.write(j, 5, authors[r])
+            sheet.write(j, 6, authors[r + 1])
+            sheet.write(j, 7, authors[r + 2])
+            j += 1
+
+        rating_nums = Soup.find_all('div', class_='star clearfix')
+        for rating in rating_nums:
+            star = rating.find_all('span')
+            sheet.write(k, 8, star[1].text)
+            reg = r'\d+'
+            vote = re.findall(reg, star[2].text)
+            sheet.write(k, 9, vote)
+            k += 1
+        quotes = Soup.find_all('p', class_='quote')
+        for quote in quotes:
+            sheet.write(m, 10, quote.text)
+            m += 1
+
+    Workbook.save('豆瓣图书Top250.xls')
+```
+
+保存结果如下：
+
+![1586523370217](C:\Users\Sheldon\AppData\Roaming\Typora\typora-user-images\1586523370217.png)
+
+
+
+5、**保存至MySQL数据库**
+
+```
+db = pymysql.connect(host='localhost', user='root', password='mysql', port=3306, db='douban')
+cursor = db.cursor()  
+sql = 'create table if not exists books(title varchar(225) not null, rat varchar(225) not null, pub varchar(225) not null,appraise varchar(225) not null)'
+cursor.execute(sql)
+
+for tr in ret:
+    ret_dict = {}
+    ret_dict["title"] = tr.xpath('./div[@class="info"]/h2/a/@title')[0]
+    ret_dict["rat"] = tr.xpath('./div[@class="info"]/div[@class="star clearfix"]/span[@class="rating_nums"]/text()')[0]
+    ret_dict["pub"] = tr.xpath('./div[@class="info"]/div[@class="pub"]/text()')[0].replace("\u2022","").replace('\n', '')
+    ret_dict["appraise"] = tr.xpath('./div[@class="info"]/div[@class="star clearfix"]/span[@class="pl"]/text()')[0].replace('\n', '')
+
+    sql_insert = 'insert into books(title, rat, pub, appraise) values(%s, %s, %s, %s)'
+
+    cursor.execute(sql_insert, (ret_dict["title"], ret_dict["rat"],ret_dict["pub"], ret_dict["appraise"]))
+    db.commit()
+db.close()
+```
+
+数据库中如下：
+
+![1586523421034](C:\Users\Sheldon\AppData\Roaming\Typora\typora-user-images\1586523421034.png)
+
+
+
+6、**保存至MongoDB数据库**
+
+```
+client = pymongo.MongoClient(host='localhost', port=27017)
+db = client.test
+collection = db.douban
+
+#  方法一
+ret_list = []
+for tr in ret:
+    ret_dict = {}
+    ret_dict["title"] = tr.xpath('./div[@class="info"]/h2/a/@title')[0]
+    ret_dict["rat"] = tr.xpath('./div[@class="info"]/div[@class="star clearfix"]/span[@class="rating_nums"]/text()')[0]
+    ret_dict["pub"] = tr.xpath('./div[@class="info"]/div[@class="pub"]/text()')[0].replace("\u2022","").replace('\n', '')
+    ret_dict["appraise"] = tr.xpath('./div[@class="info"]/div[@class="star clearfix"]/span[@class="pl"]/text()')[0].replace('\n', '')
+    ret_list.append(ret_dict)
+print(ret_list)
+for i in ret_list:
+    collection.insert_one({'书名': i["title"], '评分': i["rat"], '出版': i["pub"], '评价数': i["appraise"]})
+
+#  方法二
+books_list = []
+for tr in ret:
+    title = tr.xpath('./div[@class="info"]/h2/a/@title')[0]
+    rat = tr.xpath('./div[@class="info"]/div[@class="star clearfix"]/span[@class="rating_nums"]/text()')[0]
+    pub = tr.xpath('./div[@class="info"]/div[@class="pub"]/text()')[0].replace("\u2022","").replace('\n', '')
+    appraise = tr.xpath('./div[@class="info"]/div[@class="star clearfix"]/span[@class="pl"]/text()')[0].replace('\n', '')
+    books_list.append([title, rat, pub, appraise])
+print(books_list)
+lenth =len(books_list)
+print(lenth)
+for i in range(0,lenth):
+    books = {}
+    books['title'] = books_list[i][0]
+    books['rat'] = books_list[i][1]
+    books['pub'] = books_list[i][2]
+    books['appraise'] = books_list[i][3]
+    collection.insert_one(books)
+    print('第{}条数据插入成功'.format(i+1))
+```
+
+保存结果如下：
+
+![1586523472151](C:\Users\Sheldon\AppData\Roaming\Typora\typora-user-images\1586523472151.png)
+
+以上为常用数据库保存方式，后续持续更新。。。
